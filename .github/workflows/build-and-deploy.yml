@@ -28,5 +28,5 @@ jobs:
 
     - name: Deploy to self-hosted environment
       run: |
-        docker-compose down
-        docker-compose up -d
+        docker compose down
+        docker compose up -d
