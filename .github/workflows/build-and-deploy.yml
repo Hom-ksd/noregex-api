@@ -22,11 +22,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Build Docker image
-      run: |
-        docker build -t your-dockerhub-username/your-repo-name:${{ github.sha }} .
-
-    - name: Deploy to self-hosted environment
+    - name: Build and Deploy to self-hosted environment
       run: |
         docker compose down
-        docker compose up -d
+        docker compose up --build -d
