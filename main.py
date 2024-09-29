@@ -159,11 +159,12 @@ async def scrape_nobel_prizes():
 
     data_lock = Lock()
 
-    with ThreadPoolExecutor(max_workers=32) as executor:
-        future_to_link = {executor.submit(fetch_and_parse_link, session, link, headers): link for link in links[:50]}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_link = {executor.submit(fetch_and_parse_link, session, link, headers)}
         for future in as_completed(future_to_link):
             link = future_to_link[future]
             try:
+                print(link)
                 row = future.result()
                 with data_lock:
                     data.append(row)
