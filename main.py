@@ -3,6 +3,8 @@ from pydantic import BaseModel
 import re
 import html
 import requests
+import csv
+import time
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,7 +31,7 @@ def create_session_with_retries():
     return session
 
 @sleep_and_retry
-@limits(calls=1, period=2)  # 1 call every 2 seconds
+@limits(calls=50, period=2)  # 1 call every 2 seconds
 def rate_limited_get(session, url, headers=None, timeout=30):
     return session.get(url, headers=headers, timeout=timeout)
 
@@ -105,9 +107,10 @@ def fetch_and_parse_link(session, link, headers, debug=True):
         # Extract motivation
         motivation_pattern = r'<p>Prize motivation: (.+?)</p>'
         motivation = re.search(motivation_pattern, content)
+        print(motivation)
         
-        # Remove special characters in motivation
-        row.append(re.sub(r'[^A-Za-z0-9\s,.-]+', '', motivation.group(1).strip()) if motivation else "")
+        # Remove Special characters in motivation (")
+        row.append(re.sub('\W+', ' ', motivation.group(1).strip()) if motivation else "")
 
     else:
         row.extend([""] * 6)
@@ -168,6 +171,10 @@ async def scrape_nobel_prizes():
             except Exception as e:
                 print(f"Error processing {link}: {e}")
 
+    # with open('output.csv', 'w', newline='', encoding='utf-8') as file:
+    #     writer = csv.writer(file)
+    #     writer.writerows(data)
+
     nobel_prize_data = [
         {
             "name": row[1],
@@ -178,7 +185,7 @@ async def scrape_nobel_prizes():
             "motivation": row[6],
             "image": row[7]
         }
-        for row in data[1:]  # Exclude header row
+        for row in data[1:]  # header row
     ]
 
     scraping_status.status = "Completed"
@@ -193,12 +200,13 @@ async def get_scraping_status():
 
 @app.get("/nobel-prizes")
 async def get_all_nobel_prizes():
+    print('Get All Data')
     if scraping_status.status != "Completed":
         return {"error": "Data scraping is not complete. Please try again later."}
     return nobel_prize_data
 
 @app.get("/")
-def read_root():
+async def read_root():
     return {"Hello": "World"}
 
 if __name__ == "__main__":
