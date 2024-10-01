@@ -1,4 +1,5 @@
-from fastapi import FastAPI, BackgroundTasks
+
+from fastapi import FastAPI, BackgroundTasks, Query
 from pydantic import BaseModel
 import re
 import html
@@ -11,13 +12,34 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from ratelimit import limits, sleep_and_retry
 import asyncio
+from typing import List, Optional
 
 app = FastAPI()
-
 class ScrapingStatus(BaseModel):
     status: str
     total_links: int = 0
     processed_links: int = 0
+
+class NobelPrize(BaseModel):
+    name: str
+    category: str
+    year: str
+    born_date: str
+    born_place: str
+    motivation: str
+    image: str
+
+class Pagination(BaseModel):
+    total_records: int
+    current_page: int
+    total_pages: int
+    next_page: Optional[int]
+    prev_page: Optional[int]
+
+class NobelPrizeResponse(BaseModel):
+    data: List[NobelPrize]
+    pagination: Pagination
+
 
 scraping_status = ScrapingStatus(status="Not started")
 nobel_prize_data = []
@@ -159,12 +181,11 @@ async def scrape_nobel_prizes():
 
     data_lock = Lock()
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_link = {executor.submit(fetch_and_parse_link, session, link, headers): link for link in links[:20]}
+    with ThreadPoolExecutor(max_workers=32) as executor:
+        future_to_link = {executor.submit(fetch_and_parse_link, session, link, headers): link for link in links}
         for future in as_completed(future_to_link):
             link = future_to_link[future]
             try:
-                print(link)
                 row = future.result()
                 with data_lock:
                     data.append(row)
@@ -198,18 +219,64 @@ async def startup_event():
 @app.get("/scraping-status")
 async def get_scraping_status():
     return scraping_status
-
-@app.get("/nobel-prizes")
-async def get_all_nobel_prizes():
-    print('Get All Data')
-    if scraping_status.status != "Completed":
-        return {"error": "Data scraping is not complete. Please try again later."}
-    return nobel_prize_data
-
+    
 @app.get("/")
 async def read_root():
     return {"Hello": "World"}
+    
+@app.get("/nobel-prizes", response_model=NobelPrizeResponse)
+async def get_nobel_prizes(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(1000, ge=1, le=100, description="Number of items per page"),
+    name_filter: Optional[str] = Query(None, description="Regex pattern to filter names"),
+    category_filter: Optional[str] = Query(None, description="Regex pattern to filter categories")
+):
+    if scraping_status.status != "Completed":
+        return {"error": "Data scraping is not complete. Please try again later."}
 
+    filtered_data = nobel_prize_data
+
+    # Filter by name
+    if name_filter:
+        try:
+            name_regex = re.compile(name_filter, re.IGNORECASE)
+            filtered_data = [prize for prize in filtered_data if name_regex.search(prize['name'])]
+        except re.error:
+            return {"error": "Invalid regex pattern for name filter"}
+
+    # Filter by category
+    if category_filter:
+        try:
+            category_regex = re.compile(category_filter, re.IGNORECASE)
+            filtered_data = [prize for prize in filtered_data if category_regex.search(prize['category'])]
+        except re.error:
+            return {"error": "Invalid regex pattern for category filter"}
+
+    total_records = len(filtered_data)
+    total_pages = (total_records + page_size - 1) // page_size
+
+    # Ensure page is within valid range
+    page = min(max(1, page), total_pages)
+
+    start_index = (page - 1) * page_size
+    end_index = start_index + page_size
+
+    paginated_data = filtered_data[start_index:end_index]
+
+    next_page = page + 1 if page < total_pages else None
+    prev_page = page - 1 if page > 1 else None
+
+    return NobelPrizeResponse(
+        data=paginated_data,
+        pagination=Pagination(
+            total_records=total_records,
+            current_page=page,
+            total_pages=total_pages,
+            next_page=next_page,
+            prev_page=prev_page
+        )
+    )
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
