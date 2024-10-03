@@ -230,11 +230,13 @@ async def get_nobel_prizes(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     name_filter: Optional[str] = Query(None, description="Regex pattern to filter names"),
-    category_filter: Optional[str] = Query(None, description="Regex pattern to filter categories"),
-    country_filter: Optional[str] = Query(None, description="Regex pattern to filter countries"),
+    category_filter: Optional[str] = Query(None, description="Comma-separated list of regex patterns to filter categories"),
+    country_filter: Optional[str] = Query(None, description="Comma-separated list of regex patterns to filter countries"),
+    motivation_filter: Optional[str] = Query(None, description="Regex pattern to filter motivations"),
     birth_year_start: Optional[int] = Query(None, description="Start year for birth year range"),
     birth_year_end: Optional[int] = Query(None, description="End year for birth year range"),
-    prize_year: Optional[int] = Query(None, description="Year of the prize")
+    prize_year_start: Optional[int] = Query(None, description="Start year for prize year range"),
+    prize_year_end: Optional[int] = Query(None, description="End year for prize year range")
 ):
     if scraping_status.status != "Completed":
         return {"error": "Data scraping is not complete. Please try again later."}
@@ -249,21 +251,31 @@ async def get_nobel_prizes(
         except re.error:
             return {"error": "Invalid regex pattern for name filter"}
 
-    # Filter by category
+    # Filter by multiple categories using regex
     if category_filter:
+        category_patterns = [cat.strip() for cat in category_filter.split(',')]
         try:
-            category_regex = re.compile(category_filter, re.IGNORECASE)
+            category_regex = re.compile('|'.join(category_patterns), re.IGNORECASE)
             filtered_data = [prize for prize in filtered_data if category_regex.search(prize['category'])]
         except re.error:
             return {"error": "Invalid regex pattern for category filter"}
 
-    # Filter by country
+    # Filter by multiple countries using regex
     if country_filter:
+        country_patterns = [country.strip() for country in country_filter.split(',')]
         try:
-            country_regex = re.compile(country_filter, re.IGNORECASE)
+            country_regex = re.compile('|'.join(country_patterns), re.IGNORECASE)
             filtered_data = [prize for prize in filtered_data if country_regex.search(prize['born_place'])]
         except re.error:
             return {"error": "Invalid regex pattern for country filter"}
+
+    # Filter by motivation
+    if motivation_filter:
+        try:
+            motivation_regex = re.compile(motivation_filter, re.IGNORECASE)
+            filtered_data = [prize for prize in filtered_data if motivation_regex.search(prize['motivation'])]
+        except re.error:
+            return {"error": "Invalid regex pattern for motivation filter"}
 
     # Filter by birth year range
     if birth_year_start is not None or birth_year_end is not None:
@@ -278,9 +290,13 @@ async def get_nobel_prizes(
               extract_year(prize['born_date']) <= birth_year_end))
         ]
 
-    # Filter by prize year
-    if prize_year is not None:
-        filtered_data = [prize for prize in filtered_data if prize['year'] == str(prize_year)]
+    # Filter by prize year range
+    if prize_year_start is not None or prize_year_end is not None:
+        filtered_data = [
+            prize for prize in filtered_data 
+            if (prize_year_start is None or int(prize['year']) >= prize_year_start) and
+               (prize_year_end is None or int(prize['year']) <= prize_year_end)
+        ]
 
     total_records = len(filtered_data)
     total_pages = (total_records + page_size - 1) // page_size
@@ -306,6 +322,7 @@ async def get_nobel_prizes(
             prev_page=prev_page
         )
     )
+
 
     
 if __name__ == "__main__":
