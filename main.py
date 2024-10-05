@@ -14,6 +14,7 @@ from ratelimit import limits, sleep_and_retry
 import asyncio
 from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, BackgroundTasks, Query, HTTPException
 
 app = FastAPI()
 
@@ -230,10 +231,16 @@ async def startup_event():
 async def get_scraping_status():
     return scraping_status
 
+
 def extract_year(date_string):
     """Extract year from a date string."""
     year_match = re.search(r'\b(\d{4})\b', date_string)
     return int(year_match.group(1)) if year_match else None
+
+def validate_year(year: Optional[int] = None):
+    if year is not None and year <= -1:
+        raise HTTPException(status_code=400, detail="Year must be greater than -1")
+    return year
 
 @app.get("/nobel-prizes", response_model=NobelPrizeResponse)
 async def get_nobel_prizes(
@@ -251,19 +258,25 @@ async def get_nobel_prizes(
     if scraping_status.status != "Completed":
         return {"error": "Data scraping is not complete. Please try again later."}
 
+    # Validate year inputs
+    birth_year_start = validate_year(birth_year_start)
+    birth_year_end = validate_year(birth_year_end)
+    prize_year_start = validate_year(prize_year_start)
+    prize_year_end = validate_year(prize_year_end)
+
     filtered_data = nobel_prize_data
 
     # Filter by name
     if name_filter:
         try:
-            name_regex = re.compile(name_filter, re.IGNORECASE)
+            name_regex = re.compile(re.escape(name_filter), re.IGNORECASE)
             filtered_data = [prize for prize in filtered_data if name_regex.search(prize['name'])]
         except re.error:
             return {"error": "Invalid regex pattern for name filter"}
 
     # Filter by multiple categories using regex
     if category_filter:
-        category_patterns = [cat.strip() for cat in category_filter.split(',')]
+        category_patterns = [re.escape(cat.strip()) for cat in category_filter.split(',')]
         try:
             category_regex = re.compile('|'.join(category_patterns), re.IGNORECASE)
             filtered_data = [prize for prize in filtered_data if category_regex.search(prize['category'])]
@@ -272,7 +285,7 @@ async def get_nobel_prizes(
 
     # Filter by multiple countries using regex
     if country_filter:
-        country_patterns = [country.strip() for country in country_filter.split(',')]
+        country_patterns = [re.escape(country.strip()) for country in country_filter.split(',')]
         try:
             country_regex = re.compile('|'.join(country_patterns), re.IGNORECASE)
             filtered_data = [prize for prize in filtered_data if country_regex.search(prize['born_place'])]
@@ -282,7 +295,7 @@ async def get_nobel_prizes(
     # Filter by motivation
     if motivation_filter:
         try:
-            motivation_regex = re.compile(motivation_filter, re.IGNORECASE)
+            motivation_regex = re.compile(re.escape(motivation_filter), re.IGNORECASE)
             filtered_data = [prize for prize in filtered_data if motivation_regex.search(prize['motivation'])]
         except re.error:
             return {"error": "Invalid regex pattern for motivation filter"}
@@ -308,6 +321,8 @@ async def get_nobel_prizes(
                (prize_year_end is None or int(prize['year']) <= prize_year_end)
         ]
 
+
+
     total_records = len(filtered_data)
     total_pages = (total_records + page_size - 1) // page_size
 
@@ -332,8 +347,6 @@ async def get_nobel_prizes(
             prev_page=prev_page
         )
     )
-
-
     
 if __name__ == "__main__":
     import uvicorn
