@@ -13,8 +13,18 @@ from threading import Lock
 from ratelimit import limits, sleep_and_retry
 import asyncio
 from typing import List, Optional
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
+
 class ScrapingStatus(BaseModel):
     status: str
     total_links: int = 0
@@ -228,7 +238,7 @@ def extract_year(date_string):
 @app.get("/nobel-prizes", response_model=NobelPrizeResponse)
 async def get_nobel_prizes(
     page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(10, ge=1, description="Number of items per page"),
+    page_size: int = Query(10, ge=1, le=2000, description="Number of items per page"),
     name_filter: Optional[str] = Query(None, description="Regex pattern to filter names"),
     category_filter: Optional[str] = Query(None, description="Comma-separated list of regex patterns to filter categories"),
     country_filter: Optional[str] = Query(None, description="Comma-separated list of regex patterns to filter countries"),
